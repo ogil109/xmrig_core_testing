@@ -6,7 +6,6 @@ HASHRATE_LOG=$(mktemp)
 
 # Variables
 DURATION=3600
-OUTPUT="multicore_results.csv"
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
 
@@ -15,6 +14,61 @@ if [ "$EUID" -ne 0 ]; then
     echo "Please run with sudo: sudo $0"
     exit 1
 fi
+
+# Functions
+wait_for_xmrig_api() {
+    local api_url=$1
+    local wait_time=$2
+    local api_ready=false
+
+    for i in $(seq 1 $wait_time); do
+        if curl -s --connect-timeout 1 "$api_url" >/dev/null 2>&1; then
+            api_ready=true
+            break
+        fi
+        sleep 1
+        echo -n "."
+    done
+    echo ""
+    
+    if ! $api_ready; then
+        echo "  ⚠️  XMRig API not responding after $wait_time seconds"
+        echo "  Check XMRig logs or try: curl $api_url"
+        return 1
+    else
+        echo "  ✅ XMRig API responding"
+        return 0
+    fi
+}
+
+get_current_hashrate() {
+    local api_url=$1
+    local api_response
+    local http_code
+    local json_content
+    local hashrate
+
+    # Try up to 3 times to get hashrate
+    for i in {1..3}; do
+        api_response=$(curl -s -w "%{http_code}" --connect-timeout 5 "$api_url" 2>/dev/null)
+        http_code=${api_response: -3}
+        json_content=${api_response%???}
+        
+        if [ "$http_code" -eq 200 ]; then
+            hashrate=$(echo "$json_content" | jq -r '.hashrate.total[0] // empty' 2>/dev/null)
+            if [ -n "$hashrate" ]; then
+                echo "$hashrate"
+                return 0
+            fi
+        else
+            echo "  ⚠️  API Error: HTTP $http_code (attempt $i/3)" >&2
+        fi
+        sleep 2
+    done
+    
+    echo "0"
+    return 1
+}
 
 echo "========================================"
 echo "AMD Zen 4 Multi-Core Performance Tester"
@@ -51,24 +105,7 @@ echo "XMRig PID: $xmrig_pid (using 32 threads)"
 
 # Wait for API to become available
 echo "Waiting for XMRig API to initialize..."
-api_wait_time=30
-api_ready=false
-
-for i in $(seq 1 $api_wait_time); do
-    if curl -s --connect-timeout 1 "$XMRIG_API_URL" >/dev/null 2>&1; then
-        api_ready=true
-        break
-    fi
-    sleep 1
-    echo -n "."
-done
-echo ""
-
-if ! $api_ready; then
-    echo "  ⚠️  XMRig API not responding after $api_wait_time seconds"
-    echo "  Check XMRig logs or try: curl $XMRIG_API_URL"
-else
-    echo "  ✅ XMRig API responding"
+if wait_for_xmrig_api "$XMRIG_API_URL" 30; then
     # Get initial total hashes
     api_response=$(curl -s --connect-timeout 1 "$XMRIG_API_URL")
     initial_total_hashes=$(echo "$api_response" | jq -r '.results.hashes_total // 0')
@@ -82,22 +119,7 @@ test_start_time=$(date +%s)
 while [ $(($(date +%s) - test_start_time)) -lt $DURATION ]; do
     # Get current metrics
     # Get hashrate with detailed error reporting
-    current_hashrate="0"
-    for i in {1..3}; do
-        api_response=$(curl -s -w "%{http_code}" --connect-timeout 5 "$XMRIG_API_URL" 2>/dev/null)
-        http_code=${api_response: -3}
-        json_content=${api_response%???}
-        
-        if [ "$http_code" -eq 200 ]; then
-            current_hashrate=$(echo "$json_content" | jq -r '.hashrate.total[0] // empty' 2>/dev/null)
-            if [ -n "$current_hashrate" ]; then
-                break
-            fi
-        else
-            echo "  ⚠️  API Error: HTTP $http_code (attempt $i/3)"
-        fi
-        sleep 2
-    done
+    current_hashrate=$(get_current_hashrate "$XMRIG_API_URL")
 
     current_temp_ccd0=$(sensors | grep "Tccd1:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
     current_temp_ccd1=$(sensors | grep "Tccd2:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
