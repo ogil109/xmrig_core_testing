@@ -4,7 +4,7 @@ REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(eval echo ~$REAL_USER)
 
 # Variables
-DURATION=600
+DURATION=1200
 MONITOR_INTERVAL=5
 
 OUTPUT="single_core_results.csv"
@@ -111,10 +111,8 @@ wait_for_thermal_baseline() {
     
     for i in $(seq 1 $max_wait); do
         current_temp=$(get_ccd_temp $ccd)
-        temp_diff=$(awk "BEGIN {print $current_temp - $target_temp}" 2>/dev/null || echo "10")
-        temp_diff_abs=$(echo "$temp_diff" | sed 's/-//')
         
-        if (( $(awk "BEGIN {print ($temp_diff_abs < $tolerance) ? 1 : 0}") )); then
+        if (( $(awk "BEGIN {print ($current_temp <= $target_temp + $tolerance) ? 1 : 0}") )); then
             stable_count=$((stable_count + 1))
             echo -n "  ✅ At baseline: ${current_temp}°C (stable ${stable_count}/${required_stable_samples})  "
             
