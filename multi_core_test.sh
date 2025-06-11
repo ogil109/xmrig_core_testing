@@ -6,9 +6,11 @@ HASHRATE_LOG=$(mktemp)
 
 # Variables
 DURATION=3600
+MONITOR_INTERVAL=5
+
+OUTPUT="multi_core_results.csv"
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
-OUTPUT="multi_core_results.csv"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -86,7 +88,7 @@ echo ""
 # Initialize output CSV with headers
 echo "timestamp,hashrate,ccd0_temp,ccd1_temp,$(echo core{0..31}_freq | sed 's/ /,/g')" > "$OUTPUT"
 
-# Get baseline temperatures using new function
+# Get baseline temps
 temp_start_ccd0=$(get_ccd_temp 0)
 temp_start_ccd1=$(get_ccd_temp 1)
 
@@ -99,7 +101,7 @@ echo ""
 
 echo "Starting XMRig for all-core test..."
 
-# Start XMRig using config file
+# Start XMRig
 nohup $XMRIG_PATH \
     --http-enabled \
     --http-host=127.0.0.1 \
@@ -116,8 +118,9 @@ xmrig_pid=$!
 echo "XMRig PID: $xmrig_pid (using 32 threads)"
 
 echo "Waiting for XMRig to initialize..."
+sleep 10
 
-# Simple monitoring loop
+# Monitoring loop
 echo "Running test for ${DURATION}s..."
 test_start_time=$(date +%s)
 
@@ -145,18 +148,12 @@ while [ $(($(date +%s) - test_start_time)) -lt $DURATION ]; do
         echo "⏳ ${elapsed}s: API unavailable | CCD0: ${current_temp_ccd0}°C | CCD1: ${current_temp_ccd1}°C | ${remaining}s remaining"
     fi
     
-    sleep 10
+    sleep $MONITOR_INTERVAL
 done
 
 # Get final temperatures
 temp_end_ccd0=$(get_ccd_temp 0)
 temp_end_ccd1=$(get_ccd_temp 1)
-
-
-# Get final total hashes
-echo "Getting final hashrate data..."
-api_response=$(curl -s --connect-timeout 5 "$XMRIG_API_URL")
-final_total_hashes=$(echo "$api_response" | jq -r '.results.hashes_total // 0')
 
 # Stop XMRig
 echo "Stopping XMRig..."
