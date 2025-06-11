@@ -2,9 +2,10 @@
 
 REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(eval echo ~$REAL_USER)
+HASHRATE_LOG=$(mktemp)
 
 # Variables
-DURATION=300
+DURATION=3600
 OUTPUT="multicore_results.csv"
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
@@ -68,6 +69,10 @@ if ! $api_ready; then
     echo "  Check XMRig logs or try: curl $XMRIG_API_URL"
 else
     echo "  ✅ XMRig API responding"
+    # Get initial total hashes
+    api_response=$(curl -s --connect-timeout 1 "$XMRIG_API_URL")
+    initial_total_hashes=$(echo "$api_response" | jq -r '.results.hashes_total // 0')
+    echo "  Initial total hashes: $initial_total_hashes"
 fi
 
 # Simple monitoring loop
@@ -102,6 +107,10 @@ while [ $(($(date +%s) - test_start_time)) -lt $DURATION ]; do
     
     if [[ "$current_hashrate" != "0" && "$current_hashrate" != "" ]]; then
         echo "⚡ ${elapsed}s: ${current_hashrate} H/s | CCD0: ${current_temp_ccd0}°C | CCD1: ${current_temp_ccd1}°C | ${remaining}s remaining"
+        # Only log non-zero hashrates to avoid outliers
+        if (( $(echo "$current_hashrate > 0" | bc -l) )); then
+            echo "$current_hashrate" >> "$HASHRATE_LOG"
+        fi
     else
         echo "⏳ ${elapsed}s: Waiting for hashrate | CCD0: ${current_temp_ccd0}°C | CCD1: ${current_temp_ccd1}°C | ${remaining}s remaining"
     fi
@@ -112,6 +121,12 @@ done
 # Get final temperatures
 temp_end_ccd0=$(sensors | grep "Tccd1:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
 temp_end_ccd1=$(sensors | grep "Tccd2:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
+
+
+# Get final total hashes
+echo "Getting final hashrate data..."
+api_response=$(curl -s --connect-timeout 5 "$XMRIG_API_URL")
+final_total_hashes=$(echo "$api_response" | jq -r '.results.hashes_total // 0')
 
 # Stop XMRig
 echo "Stopping XMRig..."
@@ -124,3 +139,21 @@ echo "Multi-core test complete!"
 echo "=============================================="
 echo "CCD0: ${temp_start_ccd0}°C → ${temp_end_ccd0}°C"
 echo "CCD1: ${temp_start_ccd1}°C → ${temp_end_ccd1}°C"
+
+# Calculate average hashrate
+if [ -s "$HASHRATE_LOG" ]; then
+    total=0
+    count=0
+    while IFS= read -r rate; do
+        total=$(echo "$total + $rate" | bc)
+        count=$((count + 1))
+    done < "$HASHRATE_LOG"
+    
+    avg_hashrate=$(echo "scale=2; $total / $count" | bc)
+    echo "Average Hashrate: ${avg_hashrate} H/s (based on $count readings)"
+else
+    echo "Average Hashrate: N/A (no valid readings)"
+fi
+
+# Clean up
+rm -f "$HASHRATE_LOG"
