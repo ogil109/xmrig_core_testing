@@ -8,6 +8,7 @@ HASHRATE_LOG=$(mktemp)
 DURATION=3600
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
+OUTPUT="multi_core_results.csv"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -16,6 +17,35 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Functions
+get_cpu_freq() {
+    local cpu=$1
+    if [ -r "/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq" ]; then
+        freq_khz=$(cat "/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq" 2>/dev/null)
+        echo $(( freq_khz / 1000 ))
+    else
+        echo "0"
+    fi
+}
+
+# CCD temperature monitoring
+get_ccd_temp() {
+    local ccd=$1
+    local sensor_name=""
+    
+    # Auto-detect available CCD temperature sensors
+    if [ $ccd -eq 0 ]; then
+        sensor_name=$(sensors | grep -E "Tccd1:|Tdie:" | head -1 | cut -d: -f1)
+    else
+        sensor_name=$(sensors | grep -E "Tccd2:|Tdie:" | tail -1 | cut -d: -f1)
+    fi
+    
+    if [ -n "$sensor_name" ]; then
+        sensors | grep "$sensor_name:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
 get_current_hashrate() {
     local api_url=$1
     local api_response
@@ -53,13 +83,18 @@ echo "========================================"
 echo "Duration: ${DURATION}s all-core test"
 echo ""
 
-# Get baseline temperatures
-temp_start_ccd0=$(sensors | grep "Tccd1:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
-temp_start_ccd1=$(sensors | grep "Tccd2:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
+# Initialize output CSV with headers
+echo "timestamp,hashrate,ccd0_temp,ccd1_temp,$(echo core{0..31}_freq | sed 's/ /,/g')" > "$OUTPUT"
+
+# Get baseline temperatures using new function
+temp_start_ccd0=$(get_ccd_temp 0)
+temp_start_ccd1=$(get_ccd_temp 1)
 
 echo "Thermal baselines:"
 echo "  CCD0 baseline: ${temp_start_ccd0}°C"
 echo "  CCD1 baseline: ${temp_start_ccd1}°C"
+echo ""
+echo "Detailed metrics being logged to: $OUTPUT"
 echo ""
 
 echo "Starting XMRig for all-core test..."
@@ -90,8 +125,15 @@ while [ $(($(date +%s) - test_start_time)) -lt $DURATION ]; do
     # Get current metrics
     current_hashrate=$(get_current_hashrate "$XMRIG_API_URL")
 
-    current_temp_ccd0=$(sensors | grep "Tccd1:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
-    current_temp_ccd1=$(sensors | grep "Tccd2:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
+    current_temp_ccd0=$(get_ccd_temp 0)
+    current_temp_ccd1=$(get_ccd_temp 1)
+    
+    # Get all core frequencies and log to CSV
+    core_freqs=()
+    for core in {0..31}; do
+        core_freqs+=($(get_cpu_freq $core))
+    done
+    echo "$(date +%s),${current_hashrate:-0},$current_temp_ccd0,$current_temp_ccd1,$(IFS=,; echo "${core_freqs[*]}")" >> "$OUTPUT"
     
     elapsed=$(($(date +%s) - test_start_time))
     remaining=$((DURATION - elapsed))
@@ -107,8 +149,8 @@ while [ $(($(date +%s) - test_start_time)) -lt $DURATION ]; do
 done
 
 # Get final temperatures
-temp_end_ccd0=$(sensors | grep "Tccd1:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
-temp_end_ccd1=$(sensors | grep "Tccd2:" | awk '{print $2}' | tr -d '+°C' 2>/dev/null || echo "0")
+temp_end_ccd0=$(get_ccd_temp 0)
+temp_end_ccd1=$(get_ccd_temp 1)
 
 
 # Get final total hashes
@@ -125,6 +167,7 @@ echo ""
 echo "=============================================="
 echo "Multi-core test complete!"
 echo "=============================================="
+echo "Detailed performance data saved to: $OUTPUT"
 echo "CCD0: ${temp_start_ccd0}°C → ${temp_end_ccd0}°C"
 echo "CCD1: ${temp_start_ccd1}°C → ${temp_end_ccd1}°C"
 

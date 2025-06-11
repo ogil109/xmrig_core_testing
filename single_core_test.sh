@@ -16,13 +16,6 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo "========================================"
-echo "AMD Zen 4 Single-Core Performance Tester"
-echo "========================================"
-echo "Duration: ${DURATION}s per simlet pair"
-echo "Total test time: ~$(( DURATION * TOTAL_CORES / 60 )) minutes + thermal recovery"
-echo ""
-
 # Auto-detect CPU core count
 detect_cpu_cores() {
     local physical_cores=$(lscpu | grep "Core(s) per socket:" | awk '{print $4}')
@@ -32,9 +25,6 @@ detect_cpu_cores() {
 
 TOTAL_CORES=$(detect_cpu_cores)
 echo "Detected $TOTAL_CORES physical cores"
-
-# Create CSV header
-echo "Physical_Core,CCD,Hashrate_H/s,Avg_Freq_MHz,Max_Freq_MHz,Boost_Ratio,Tccd_Start,Tccd_Peak,Temp_Delta,Stable,Notes" > $OUTPUT
 
 # CPU frequency monitoring
 get_cpu_freq() {
@@ -73,4 +63,45 @@ calculate_affinity_mask() {
     local decimal_mask=$(echo "2^$core1 + 2^$core2" | bc)
     printf "0x%X" $decimal_mask
 }
+
+get_current_hashrate() {
+    local api_url=$1
+    local api_response
+    local http_code
+    local json_content
+    local hashrate
+    local max_retries=30
+    local retry_delay=1
+
+    # Keep trying until we get a valid hashrate
+    for i in $(seq 1 $max_retries); do
+        api_response=$(curl -s -w "%{http_code}" --connect-timeout 5 "$api_url" 2>/dev/null)
+        http_code=${api_response: -3}
+        json_content=${api_response%???}
+        
+        if [ "$http_code" -eq 200 ]; then
+            hashrate=$(echo "$json_content" | jq -r '.hashrate.total[0] // empty' 2>/dev/null)
+            if [[ -n "$hashrate" ]] && (( $(echo "$hashrate > 0" | bc -l) )); then
+                echo "$hashrate"
+                return 0
+            fi
+        fi
+        
+        # Wait before retrying
+        sleep $retry_delay
+    done
+    
+    echo ""
+    return 1
+}
+
+echo "========================================"
+echo "AMD Zen 4 Single-Core Performance Tester"
+echo "========================================"
+echo "Duration: ${DURATION}s per simlet pair"
+echo "Total test time: ~$(( DURATION * TOTAL_CORES / 60 )) minutes + thermal recovery"
+echo ""
+
+# Create CSV header
+echo "Physical_Core,CCD,Hashrate_H/s,Avg_Freq_MHz,Max_Freq_MHz,Boost_Ratio,Tccd_Start,Tccd_Peak,Temp_Delta,Stable,Notes" > $OUTPUT
 
