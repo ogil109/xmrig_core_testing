@@ -4,8 +4,8 @@ REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(eval echo ~$REAL_USER)
 
 # Variables
-DURATION=1200
-MONITOR_INTERVAL=5
+DURATION=$1
+MONITOR_INTERVAL=${2:-5}
 
 OUTPUT="single_core_results.csv"
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
