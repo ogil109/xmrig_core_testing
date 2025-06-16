@@ -4,10 +4,11 @@ REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(eval echo ~$REAL_USER)
 
 # Variables
-DURATION=$1
-MONITOR_INTERVAL=${2:-5}
+OUTPUT=${1:-"single_core_results.csv"}
 
-OUTPUT="single_core_results.csv"
+DURATION=$2
+MONITOR_INTERVAL=${3:-5}
+
 XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
 

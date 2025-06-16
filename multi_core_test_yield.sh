@@ -5,13 +5,15 @@ REAL_HOME=$(eval echo ~$REAL_USER)
 HASHRATE_LOG=$(mktemp)
 
 # Variables
-OUTPUT=${1:-"multi_core_yield_results.csv"}
+OUTPUT=${1:-"multi_core_results.csv"}
 
 DURATION=$2
 MONITOR_INTERVAL=${3:-5}
 
-XMRIG_PATH="$REAL_HOME/.local/bin/xmrig"
 XMRIG_API_URL="http://127.0.0.1:8080/1/summary"
+
+## Source mining configuration from real user's home
+#source "$REAL_HOME/.bashrc.d/mining.bash"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -100,26 +102,13 @@ echo ""
 echo "Detailed metrics being logged to: $OUTPUT"
 echo ""
 
-echo "Starting XMRig for all-core test..."
-
-# Start XMRig
-nohup $XMRIG_PATH \
-    --http-enabled \
-    --http-host=127.0.0.1 \
-    --http-port=8080 \
-    --algo=rx/0 \
-    --stress \
-    --huge-pages \
-    --randomx-1gb-pages \
-    --cpu-priority 3 \
-    --threads 32 \
-    < /dev/null > /dev/null 2>&1 &
-
-xmrig_pid=$!
-echo "XMRig PID: $xmrig_pid (using 32 threads)"
-
-echo "Waiting for XMRig to initialize..."
-sleep 10
+#echo "Starting XMRig for all-core test..."
+#
+## Start mining services using the actual function
+#start_mining ultra
+#
+#echo "Waiting for XMRig to initialize..."
+#sleep 10
 
 # Monitoring loop
 echo "Running test for ${DURATION}s..."
@@ -156,10 +145,9 @@ done
 temp_end_ccd0=$(get_ccd_temp 0)
 temp_end_ccd1=$(get_ccd_temp 1)
 
-# Stop XMRig
-echo "Stopping XMRig..."
-kill -9 $xmrig_pid 2>/dev/null
-pkill -9 xmrig 2>/dev/null
+## Stop mining services
+#echo "Stopping all mining services..."
+#mine-stop
 
 echo ""
 echo "=============================================="
